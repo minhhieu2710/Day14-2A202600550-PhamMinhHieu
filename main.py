@@ -2,28 +2,46 @@ import asyncio
 import json
 import os
 import time
+from typing import List, Dict, Any
 from engine.runner import BenchmarkRunner
 from agent.main_agent import MainAgent
+from engine.retrieval_eval import RetrievalEvaluator # Import RetrievalEvaluator
+from engine.llm_judge import LLMJudge
 
 # Giả lập các components Expert
 class ExpertEvaluator:
-    async def score(self, case, resp): 
-        # Giả lập tính toán Hit Rate và MRR
+    def __init__(self):
+        self.retrieval_evaluator = RetrievalEvaluator()
+        # TODO: Khởi tạo các evaluator khác như RAGAS (Faithfulness, Relevancy) ở đây
+
+    async def score(self, case: Dict, agent_response: Dict) -> Dict: 
+        """
+        Đánh giá câu trả lời của agent dựa trên nhiều tiêu chí.
+        """
+        # 1. Đánh giá Retrieval
+        expected_retrieval_ids = case.get("expected_retrieval_ids", [])
+        retrieved_ids = agent_response.get("metadata", {}).get("retrieved_ids", [])
+        
+        hit_rate = self.retrieval_evaluator.calculate_hit_rate(expected_retrieval_ids, retrieved_ids)
+        mrr = self.retrieval_evaluator.calculate_mrr(expected_retrieval_ids, retrieved_ids)
+
+        # TODO: Tích hợp RAGAS hoặc các thư viện đánh giá khác
+        # Ví dụ:
+        # faithfulness_score = await self.ragas_evaluator.evaluate_faithfulness(agent_response["answer"], agent_response["contexts"])
+        # relevancy_score = await self.ragas_evaluator.evaluate_relevancy(agent_response["answer"], case["question"])
+        
+        # Giả lập các điểm số RAGAS cho đến khi bạn tích hợp thực tế
         return {
-            "faithfulness": 0.9, 
-            "relevancy": 0.8,
-            "retrieval": {"hit_rate": 1.0, "mrr": 0.5}
+            "faithfulness": 0.92, # Giả lập điểm Faithfulness
+            "relevancy": 0.88,   # Giả lập điểm Relevancy
+            "retrieval": {
+                "hit_rate": hit_rate,
+                "mrr": mrr
+            }
         }
 
-class MultiModelJudge:
-    async def evaluate_multi_judge(self, q, a, gt): 
-        return {
-            "final_score": 4.5, 
-            "agreement_rate": 0.8,
-            "reasoning": "Cả 2 model đồng ý đây là câu trả lời tốt."
-        }
 
-async def run_benchmark_with_results(agent_version: str):
+async def run_benchmark_with_results(agent_version: str, agent_instance: Any):
     print(f"🚀 Khởi động Benchmark cho {agent_version}...")
 
     if not os.path.exists("data/golden_set.jsonl"):
@@ -37,29 +55,51 @@ async def run_benchmark_with_results(agent_version: str):
         print("❌ File data/golden_set.jsonl rỗng. Hãy tạo ít nhất 1 test case.")
         return None, None
 
-    runner = BenchmarkRunner(MainAgent(), ExpertEvaluator(), MultiModelJudge())
+    # Khởi tạo các evaluator thực tế
+    expert_evaluator = ExpertEvaluator()
+    multi_model_judge = LLMJudge() 
+
+    runner = BenchmarkRunner(agent_instance, expert_evaluator, multi_model_judge)
     results = await runner.run_all(dataset)
 
     total = len(results)
+    if total == 0:
+        print("Không có kết quả nào được tạo ra.")
+        return None, None
+
+    # Tính toán Token và Cost (Expert Feature)
+    total_tokens = sum(r.get("metadata", {}).get("tokens_used", 0) for r in results)
+    # Giá GPT-4o-mini: ~0.15$ per 1M tokens input
+    total_cost = (total_tokens / 1000000) * 0.15 
+
+    # Tính toán Inter-rater Reliability (Cohen's Kappa giả lập)
+    gpt_scores = [r["judge"]["individual_scores"]["gpt-4o"] for r in results]
+    claude_scores = [r["judge"]["individual_scores"]["claude-3-5"] for r in results]
+    kappa = multi_model_judge.calculate_cohens_kappa(gpt_scores, claude_scores)
+
     summary = {
         "metadata": {"version": agent_version, "total": total, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")},
         "metrics": {
             "avg_score": sum(r["judge"]["final_score"] for r in results) / total,
-            "hit_rate": sum(r["ragas"]["retrieval"]["hit_rate"] for r in results) / total,
-            "agreement_rate": sum(r["judge"]["agreement_rate"] for r in results) / total
+            "hit_rate": sum(r["expert_eval"]["retrieval"]["hit_rate"] for r in results) / total, # Đổi từ "ragas" sang "expert_eval"
+            "agreement_rate": sum(r["judge"]["agreement_rate"] for r in results) / total,
+            "avg_faithfulness": sum(r["expert_eval"]["faithfulness"] for r in results) / total,
+            "avg_relevancy": sum(r["expert_eval"]["relevancy"] for r in results) / total,
+            "cohens_kappa": kappa,
+            "total_tokens": total_tokens,
+            "estimated_cost_usd": total_cost
         }
     }
     return results, summary
 
-async def run_benchmark(version):
-    _, summary = await run_benchmark_with_results(version)
-    return summary
-
 async def main():
-    v1_summary = await run_benchmark("Agent_V1_Base")
+    # Chạy benchmark cho Agent V1
+    v1_agent = MainAgent(version="v1") # Instance của Agent V1
+    _, v1_summary = await run_benchmark_with_results("Agent_V1_Base", v1_agent)
     
     # Giả lập V2 có cải tiến (để test logic)
-    v2_results, v2_summary = await run_benchmark_with_results("Agent_V2_Optimized")
+    v2_agent = MainAgent(version="v2") # Bây giờ V2 đã khác biệt
+    v2_results, v2_summary = await run_benchmark_with_results("Agent_V2_Optimized", v2_agent)
     
     if not v1_summary or not v2_summary:
         print("❌ Không thể chạy Benchmark. Kiểm tra lại data/golden_set.jsonl.")
