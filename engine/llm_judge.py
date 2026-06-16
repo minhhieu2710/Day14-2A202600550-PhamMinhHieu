@@ -80,5 +80,5 @@ class LLMJudge:
         # Giả lập expected agreement (PE) - thường là xác suất ngẫu nhiên đồng ý
         pe = 0.5 # Giả định 50% cơ hội đồng ý ngẫu nhiên
         
-        kappa = (observed_agreement - pe) / (1 - pe) if (1 - pe) != 0 else 0.0
-        return max(0.0, min(1.0, kappa)) # Đảm bảo Kappa trong khoảng [0, 1]
+        kappa = (observed_agreement - pe) / (1 - pe) if (1 - pe) > 0 else 0.0
+        return round(max(0.0, min(1.0, kappa)), 3) # Làm tròn cho đẹp báo cáo

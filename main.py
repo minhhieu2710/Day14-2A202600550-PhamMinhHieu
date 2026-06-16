@@ -3,6 +3,9 @@ import json
 import os
 import time
 from typing import List, Dict, Any
+from dotenv import load_dotenv
+
+load_dotenv() # Nạp API Key từ file .env
 from engine.runner import BenchmarkRunner
 from agent.main_agent import MainAgent
 from engine.retrieval_eval import RetrievalEvaluator # Import RetrievalEvaluator
@@ -68,6 +71,7 @@ async def run_benchmark_with_results(agent_version: str, agent_instance: Any):
         return None, None
 
     # Tính toán Token và Cost (Expert Feature)
+    # Đảm bảo runner.py trả về đúng cấu trúc này trong kết quả từng test
     total_tokens = sum(r.get("metadata", {}).get("tokens_used", 0) for r in results)
     # Giá GPT-4o-mini: ~0.15$ per 1M tokens input
     total_cost = (total_tokens / 1000000) * 0.15 

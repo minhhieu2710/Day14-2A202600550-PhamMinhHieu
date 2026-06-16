@@ -2,6 +2,9 @@ import json
 import asyncio
 import os
 from typing import List, Dict, Any
+from dotenv import load_dotenv
+
+load_dotenv() # Nạp API Key từ file .env
 
 # Giả lập thư viện OpenAI/Anthropic client
 class MockLLMClient:
